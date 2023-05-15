@@ -35,20 +35,17 @@ def confirmation(**kwargs):
         doc.middlename = args.get("MiddleName")
         doc.lastname = args.get("LastName")
         doc.insert(ignore_permissions=True)
-        frappe.log_error("confirmation" + "  " + str(args), "confirmation")
         frappe.db.commit()
         context = {"ResultCode": 0, "ResultDesc": "Accepted"}
         return dict(context)
     except Exception as e:
-        frappe.log_error(frappe.get_traceback(), str(e))
+        frappe.log_error(frappe.get_traceback(), str(e)[:140])
         context = {"ResultCode": 1, "ResultDesc": "Rejected"}
         return dict(context)
 
 
 @frappe.whitelist(allow_guest=True)
 def validation(**kwargs):
-    args = frappe._dict(kwargs)
-    frappe.log_error("validation" + "  " + str(args), "validation")
     context = {"ResultCode": 0, "ResultDesc": "Accepted"}
     return dict(context)
 

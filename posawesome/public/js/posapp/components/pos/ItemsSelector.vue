@@ -1,7 +1,7 @@
 <template>
   <div>
     <v-card
-      class="selection mx-auto grey lighten-5"
+      class="selection mx-auto grey lighten-5 mt-3"
       style="max-height: 75vh; height: 75vh"
     >
       <v-progress-linear
@@ -73,18 +73,22 @@
                       '/assets/posawesome/js/posapp/components/pos/placeholder-image.png'
                     "
                     class="white--text align-end"
-                    gradient="to bottom, rgba(0,0,0,.2), rgba(0,0,0,.7)"
+                    gradient="to bottom, rgba(0,0,0,0), rgba(0,0,0,0.4)"
                     height="100px"
                   >
                     <v-card-text
                       v-text="item.item_name"
-                      class="text-subtitle-2 px-1 pb-2"
+                      class="text-caption px-1 pb-0"
                     ></v-card-text>
                   </v-img>
                   <v-card-text class="text--primary pa-1">
                     <div class="text-caption primary--text">
                       {{ formtCurrency(item.rate) || 0 }}
                       {{ item.currency || '' }}
+                    </div>
+                    <div class="text-caption golden--text">
+                      {{ formtFloat(item.actual_qty) || 0 }}
+                      {{ item.stock_uom || '' }}
                     </div>
                   </v-card-text>
                 </v-card>
@@ -104,10 +108,14 @@
                   @click:row="add_item"
                 >
                   <template v-slot:item.rate="{ item }">
-                    {{ formtCurrency(item.rate) }}
+                    <span class="primary--text">{{
+                      formtCurrency(item.rate)
+                    }}</span>
                   </template>
                   <template v-slot:item.actual_qty="{ item }">
-                    {{ formtFloat(item.actual_qty) }}
+                    <span class="golden--text">{{
+                      formtFloat(item.actual_qty)
+                    }}</span>
                   </template>
                 </v-data-table>
               </template>
@@ -156,7 +164,6 @@
   </div>
 </template>
 
-
 <script>
 import { evntBus } from '../../bus';
 import _ from 'lodash';
@@ -204,7 +211,7 @@ export default {
     },
     get_items() {
       if (!this.pos_profile) {
-        console.log('No POS Profile');
+        console.error('No POS Profile');
         return;
       }
       const vm = this;
@@ -285,6 +292,7 @@ export default {
       return items_headers;
     },
     add_item(item) {
+      item = { ...item };
       if (item.has_variants) {
         evntBus.$emit('open_variants_model', item, this.items);
       } else {
@@ -517,6 +525,9 @@ export default {
         frappe.defaults.get_default('float_precision') || 2;
       this.currency_precision =
         frappe.defaults.get_default('currency_precision') || 2;
+      this.items_view = this.pos_profile.posa_default_card_view
+        ? 'card'
+        : 'list';
     });
     evntBus.$on('update_cur_items_details', () => {
       this.update_cur_items_details();
@@ -540,5 +551,4 @@ export default {
 };
 </script>
 
-<style scoped>
-</style>
+<style scoped></style>

@@ -138,7 +138,10 @@
                 color="success"
                 dark
                 :disabled="payment.amount == 0"
-                @click="phone_dialog = true"
+                @click="
+                  (phone_dialog = true),
+                    (payment.amount = Math.ceil(payment.amount))
+                "
               >
                 {{ __('Request') }}
               </v-btn>
@@ -607,27 +610,37 @@
 
     <v-card flat class="cards mb-0 mt-3 py-0">
       <v-row align="start" no-gutters>
-        <v-col cols="12">
+        <v-col cols="6">
           <v-btn
             block
-            class="pa-1"
             large
-            color="error"
+            color="primary"
             dark
-            @click="back_to_invoice"
-            >{{ __('Back') }}</v-btn
+            @click="submit"
+            :disabled="vaildatPayment"
+            >{{ __('Submit') }}</v-btn
+          >
+        </v-col>
+        <v-col cols="6" class="pl-1">
+          <v-btn
+            block
+            large
+            color="success"
+            dark
+            @click="submit(undefined, false, true)"
+            :disabled="vaildatPayment"
+            >{{ __('Submit & Print') }}</v-btn
           >
         </v-col>
         <v-col cols="12">
           <v-btn
             block
-            class="mt-2"
+            class="mt-2 pa-1"
             large
-            color="success"
+            color="error"
             dark
-            @click="submit"
-            :disabled="vaildatPayment"
-            >{{ __('Submit Payments') }}</v-btn
+            @click="back_to_invoice"
+            >{{ __('Cancel Payment') }}</v-btn
           >
         </v-col>
       </v-row>
@@ -705,7 +718,7 @@ export default {
       evntBus.$emit('show_payment', 'false');
       evntBus.$emit('set_customer_readonly', false);
     },
-    submit() {
+    submit(event, payment_received = false, print = false) {
       if (!this.invoice_doc.is_return && this.total_payments < 0) {
         evntBus.$emit('show_mesage', {
           text: `Payments not correct`,
@@ -713,6 +726,29 @@ export default {
         });
         frappe.utils.play_sound('error');
         return;
+      }
+      // validate phone payment
+      let phone_payment_is_valid = true;
+      if (!payment_received) {
+        this.invoice_doc.payments.forEach((payment) => {
+          if (
+            payment.type == 'Phone' &&
+            ![0, '0', '', null, undefined].includes(payment.amount)
+          ) {
+            phone_payment_is_valid = false;
+          }
+        });
+        if (!phone_payment_is_valid) {
+          evntBus.$emit('show_mesage', {
+            text: __(
+              'Please request phone payment or use other payment method'
+            ),
+            color: 'error',
+          });
+          frappe.utils.play_sound('error');
+          console.error('phone payment not requested');
+          return;
+        }
       }
 
       if (
@@ -789,7 +825,7 @@ export default {
         return;
       }
 
-      this.submit_invoice();
+      this.submit_invoice(print);
       this.customer_credit_dict = [];
       this.redeem_customer_credit = false;
       this.is_cashback = true;
@@ -798,7 +834,7 @@ export default {
       evntBus.$emit('new_invoice', 'false');
       this.back_to_invoice();
     },
-    submit_invoice() {
+    submit_invoice(print) {
       let data = {};
       data['total_change'] = -this.diff_payment;
       data['paid_change'] = this.paid_change;
@@ -817,7 +853,9 @@ export default {
         async: true,
         callback: function (r) {
           if (r.message) {
-            vm.load_print_page();
+            if (print) {
+              vm.load_print_page();
+            }
             evntBus.$emit('set_last_invoice', vm.invoice_doc.name);
             evntBus.$emit('show_mesage', {
               text: `Invoice ${r.message.name} is Submited`,
@@ -1030,7 +1068,7 @@ export default {
         title: __(`Waiting for payment... `),
       });
 
-      let formData = this.invoice_doc;
+      let formData = { ...this.invoice_doc };
       formData['total_change'] = -this.diff_payment;
       formData['paid_change'] = this.paid_change;
       formData['credit_change'] = -this.credit_change;
@@ -1087,7 +1125,7 @@ export default {
                       evntBus.$emit('unfreeze');
                       evntBus.$emit('show_mesage', {
                         text: __('Payment of {0} received successfully.', [
-                          formtCurrency(
+                          vm.formtCurrency(
                             message.grand_total,
                             vm.invoice_doc.currency,
                             0
@@ -1099,7 +1137,7 @@ export default {
                         .get_doc('Sales Invoice', vm.invoice_doc.name)
                         .then((doc) => {
                           vm.invoice_doc = doc;
-                          vm.submit();
+                          vm.submit(null, true);
                         });
                     }
                   });
