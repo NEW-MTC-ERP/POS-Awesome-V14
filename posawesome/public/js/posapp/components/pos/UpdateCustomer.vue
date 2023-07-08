@@ -192,7 +192,7 @@ export default {
     groups: [],
     territory: '',
     territorys: [],
-    genders: ['Male', 'Female'],
+    genders: [],
     customer_type: 'Individual',
     gender: '',
     loyalty_points: null,
@@ -309,6 +309,7 @@ export default {
           customer_type: this.customer_type,
           gender: this.gender,
           method: this.customer_id ? 'update' : 'create',
+          pos_profile_doc: this.pos_profile,
         };
         frappe.call({
           method: 'posawesome.posawesome.api.posapp.create_customer',
@@ -357,9 +358,13 @@ export default {
         this.territory = data.territory;
         this.loyalty_points = data.loyalty_points;
         this.loyalty_program = data.loyalty_program;
+        this.gender = data.gender;
       }
     });
     evntBus.$on('register_pos_profile', (data) => {
+      this.pos_profile = data.pos_profile;
+    });
+    evntBus.$on('payments_register_pos_profile', (data) => {
       this.pos_profile = data.pos_profile;
     });
     this.getCustomerGroups();
