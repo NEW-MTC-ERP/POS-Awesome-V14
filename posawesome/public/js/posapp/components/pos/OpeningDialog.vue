@@ -1,6 +1,6 @@
 <template>
   <v-row justify="center">
-    <v-dialog v-model="isOpen" persistent max-width="600px">
+    <v-dialog v-model="dialog" persistent max-width="600px">
       <!-- <template v-slot:activator="{ on, attrs }">
         <v-btn color="primary" dark v-bind="attrs" v-on="on">Open Dialog</v-btn>
       </template>-->
@@ -15,7 +15,7 @@
             <v-row>
               <v-col cols="12">
                 <v-autocomplete
-                  :items="companies"
+                  :items="companys"
                   :label="frappe._('Company')"
                   v-model="company"
                   required
@@ -41,7 +41,6 @@
                   >
                     <template v-slot:item.amount="props">
                       <v-edit-dialog :return-value.sync="props.item.amount">
-                        {{ currencySymbol(props.item.currency) }}
                         {{ formtCurrency(props.item.amount) }}
                         <template v-slot:input>
                           <v-text-field
@@ -63,14 +62,7 @@
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn color="error" dark @click="go_desk">Cancel</v-btn>
-          <v-btn
-            color="success"
-            :disabled="is_loading"
-            dark
-            @click="submit_dialog"
-            >Submit</v-btn
-          >
+          <v-btn color="success" dark @click="submit_dialog">Submit</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -79,44 +71,38 @@
 
 <script>
 import { evntBus } from '../../bus';
-import format from '../../format';
 export default {
-  mixins: [format],
   props: ['dialog'],
-  data() {
-    return {
-      isOpen: this.dialog ? this.dialog : false,
-      dialog_data: {},
-      is_loading: false,
-      companies: [],
-      company: '',
-      pos_profiles_data: [],
-      pos_profiles: [],
-      pos_profile: '',
-      payments_method_data: [],
-      payments_methods: [],
-      payments_methods_headers: [
-        {
-          text: __('Mode of Payment'),
-          align: 'start',
-          sortable: false,
-          value: 'mode_of_payment',
-        },
-        {
-          text: __('Opening Amount'),
-          value: 'amount',
-          align: 'center',
-          sortable: false,
-        },
-      ],
-      itemsPerPage: 100,
-      max25chars: (v) => v.length <= 12 || 'Input too long!', // TODO : should validate as number
-      pagination: {},
-      snack: false, // TODO : need to remove
-      snackColor: '', // TODO : need to remove
-      snackText: '', // TODO : need to remove
-    };
-  },
+  data: () => ({
+    dialog_data: {},
+    companys: [],
+    company: '',
+    pos_profiles_data: [],
+    pos_profiles: [],
+    pos_profile: '',
+    payments_method_data: [],
+    payments_methods: [],
+    payments_methods_headers: [
+      {
+        text: __('Mode of Payment'),
+        align: 'start',
+        sortable: false,
+        value: 'mode_of_payment',
+      },
+      {
+        text: __('Opening Amount'),
+        value: 'amount',
+        align: 'center',
+        sortable: false,
+      },
+    ],
+    itemsPerPage: 100,
+    max25chars: (v) => v.length <= 12 || 'Input too long!', // TODO : should validate as number
+    pagination: {},
+    snack: false, // TODO : need to remove
+    snackColor: '', // TODO : need to remove
+    snackText: '', // TODO : need to remove
+  }),
   watch: {
     company(val) {
       this.pos_profiles = [];
@@ -138,7 +124,6 @@ export default {
           this.payments_methods.push({
             mode_of_payment: element.mode_of_payment,
             amount: 0,
-            currency: element.currency,
           });
         }
       });
@@ -155,10 +140,10 @@ export default {
         args: {},
         callback: function (r) {
           if (r.message) {
-            r.message.companies.forEach((element) => {
-              vm.companies.push(element.name);
+            r.message.companys.forEach((element) => {
+              vm.companys.push(element.name);
             });
-            vm.company = vm.companies[0];
+            vm.company = vm.companys[0];
             vm.pos_profiles_data = r.message.pos_profiles_data;
             vm.payments_method_data = r.message.payments_method;
           }
@@ -169,7 +154,6 @@ export default {
       if (!this.payments_methods.length || !this.company || !this.pos_profile) {
         return;
       }
-      this.is_loading = true;
       const vm = this;
       return frappe
         .call('posawesome.posawesome.api.posapp.create_opening_voucher', {
@@ -182,13 +166,12 @@ export default {
             evntBus.$emit('register_pos_data', r.message);
             evntBus.$emit('set_company', r.message.company);
             vm.close_opening_dialog();
-            is_loading = false;
           }
         });
     },
-    go_desk() {
-      frappe.set_route('/');
-      location.reload();
+    formtCurrency(value) {
+      value = parseFloat(value);
+      return value.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,');
     },
   },
   created: function () {

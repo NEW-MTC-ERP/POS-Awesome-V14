@@ -12,16 +12,13 @@ from erpnext.stock.get_item_details import get_item_details
 from erpnext.accounts.doctype.pos_profile.pos_profile import get_item_groups
 from frappe.utils.background_jobs import enqueue
 from erpnext.accounts.party import get_party_bank_account
-from erpnext.stock.doctype.batch.batch import (
-    get_batch_no,
-    get_batch_qty,
-    set_batch_nos,
-)
+from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty, set_batch_nos
 from erpnext.accounts.doctype.payment_request.payment_request import (
+    get_gateway_details,
     get_dummy_message,
     get_existing_payment_request_amount,
 )
-
+from erpnext.controllers.accounts_controller import add_taxes_from_tax_template
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import (
     get_loyalty_program_details_with_points,
 )
@@ -29,17 +26,16 @@ from posawesome.posawesome.doctype.pos_coupon.pos_coupon import check_coupon_cod
 from posawesome.posawesome.doctype.delivery_charges.delivery_charges import (
     get_applicable_delivery_charges as _get_applicable_delivery_charges,
 )
-from frappe.utils.caching import redis_cache
 
 
 @frappe.whitelist()
 def get_opening_dialog_data():
     data = {}
-    data["companies"] = frappe.get_list("Company", limit_page_length=0, order_by="name")
+    data["companys"] = frappe.get_list("Company", limit_page_length=0, order_by="name")
     data["pos_profiles_data"] = frappe.get_list(
         "POS Profile",
         filters={"disabled": 0},
-        fields=["name", "company", "currency"],
+        fields=["name", "company"],
         limit_page_length=0,
         order_by="name",
     )
@@ -57,13 +53,8 @@ def get_opening_dialog_data():
         fields=["*"],
         limit_page_length=0,
         order_by="parent",
-        ignore_permissions=True,
+        ignore_permissions=True
     )
-    # set currency from pos profile
-    for mode in data["payments_method"]:
-        mode["currency"] = frappe.get_cached_value(
-            "POS Profile", mode["parent"], "currency"
-        )
 
     return data
 
@@ -126,215 +117,131 @@ def update_opening_shift_data(data, pos_profile):
 
 
 @frappe.whitelist()
-def get_items(pos_profile, price_list=None, item_group="", search_value=""):
-    _pos_profile = json.loads(pos_profile)
-    ttl = _pos_profile.get("posa_server_cache_duration")
-    if ttl:
-        ttl = int(ttl) * 30
+def get_items(pos_profile, price_list=None):
+    pos_profile = json.loads(pos_profile)
+    if not price_list:
+        price_list = pos_profile.get("selling_price_list")
+    condition = ""
+    condition += get_item_group_condition(pos_profile.get("name"))
+    if not pos_profile.get("posa_show_template_items"):
+        condition += " AND has_variants = 0"
 
-    @redis_cache(ttl=ttl or 1800)
-    def __get_items(pos_profile, price_list, item_group, search_value):
-        return _get_items(pos_profile, price_list, item_group, search_value)
+    result = []
 
-    def _get_items(pos_profile, price_list, item_group, search_value):
-        pos_profile = json.loads(pos_profile)
-        today = nowdate()
-        data = dict()
-        posa_display_items_in_stock = pos_profile.get("posa_display_items_in_stock")
-        search_serial_no = pos_profile.get("posa_search_serial_no")
-        search_batch_no = pos_profile.get("posa_search_batch_no")
-        posa_show_template_items = pos_profile.get("posa_show_template_items")
-        warehouse = pos_profile.get("warehouse")
-        use_limit_search = pos_profile.get("pose_use_limit_search")
-        search_limit = 0
+    items_data = frappe.db.sql(
+        """
+        SELECT
+            name AS item_code,
+            item_name,
+            description,
+            stock_uom,
+            image,
+            is_stock_item,
+            has_variants,
+            variant_of,
+            item_group,
+            idx as idx,
+            has_batch_no,
+            has_serial_no,
+            max_discount,
+            brand
+        FROM
+            `tabItem`
+        WHERE
+            disabled = 0
+                AND is_sales_item = 1
+                AND is_fixed_asset = 0
+                {0}
+        ORDER BY
+            name asc
+            """.format(
+            condition
+        ),
+        as_dict=1,
+    )
 
-        if not price_list:
-            price_list = pos_profile.get("selling_price_list")
-
-        limit = ""
-
-        condition = ""
-        condition += get_item_group_condition(pos_profile.get("name"))
-
-        if use_limit_search:
-            search_limit = pos_profile.get("posa_search_limit") or 500
-            if search_value:
-                data = search_serial_or_batch_or_barcode_number(
-                    search_value, search_serial_no
-                )
-
-            item_code = data.get("item_code") if data.get("item_code") else search_value
-            serial_no = data.get("serial_no") if data.get("serial_no") else ""
-            batch_no = data.get("batch_no") if data.get("batch_no") else ""
-            barcode = data.get("barcode") if data.get("barcode") else ""
-
-            condition += get_seearch_items_conditions(
-                item_code, serial_no, batch_no, barcode
-            )
-            if item_group:
-                condition += " AND item_group like '%{item_group}%'".format(
-                    item_group=item_group
-                )
-            limit = " LIMIT {search_limit}".format(search_limit=search_limit)
-
-        if not posa_show_template_items:
-            condition += " AND has_variants = 0"
-
-        result = []
-
-        items_data = frappe.db.sql(
-            """
-            SELECT
-                name AS item_code,
-                item_name,
-                description,
-                stock_uom,
-                image,
-                is_stock_item,
-                has_variants,
-                variant_of,
-                item_group,
-                idx as idx,
-                has_batch_no,
-                has_serial_no,
-                max_discount,
-                brand
-            FROM
-                `tabItem`
-            WHERE
-                disabled = 0
-                    AND is_sales_item = 1
-                    AND is_fixed_asset = 0
-                    {condition}
-            ORDER BY
-                item_name asc
-            {limit}
-                """.format(
-                condition=condition, limit=limit
-            ),
-            as_dict=1,
+    if items_data:
+        items = [d.item_code for d in items_data]
+        item_prices_data = frappe.get_all(
+            "Item Price",
+            fields=["item_code", "price_list_rate", "currency", "uom"],
+            filters={
+                "price_list": price_list,
+                "item_code": ["in", items],
+                "currency": pos_profile.get("currency"),
+                "selling": 1,
+            },
         )
 
-        if items_data:
-            items = [d.item_code for d in items_data]
-            item_prices_data = frappe.get_all(
-                "Item Price",
-                fields=["item_code", "price_list_rate", "currency", "uom"],
-                filters={
-                    "price_list": price_list,
-                    "item_code": ["in", items],
-                    "currency": pos_profile.get("currency"),
-                    "selling": 1,
-                    "valid_from": ["<=", today],
-                },
-                or_filters=[
-                    ["valid_upto", ">=", today],
-                    ["valid_upto", "in", ["", None]],
-                ],
-                order_by="valid_from ASC, valid_upto DESC",
-            )
+        item_prices = {}
+        for d in item_prices_data:
+            item_prices.setdefault(d.item_code, {})
+            item_prices[d.item_code][d.get("uom") or "None"] = d
 
-            item_prices = {}
-            for d in item_prices_data:
-                item_prices.setdefault(d.item_code, {})
-                item_prices[d.item_code][d.get("uom") or "None"] = d
-
-            for item in items_data:
-                item_code = item.item_code
-                item_price = {}
-                if item_prices.get(item_code):
-                    item_price = (
-                        item_prices.get(item_code).get(item.stock_uom)
-                        or item_prices.get(item_code).get("None")
-                        or {}
-                    )
-                item_barcode = frappe.get_all(
-                    "Item Barcode",
-                    filters={"parent": item_code},
-                    fields=["barcode", "posa_uom"],
+        for item in items_data:
+            item_code = item.item_code
+            item_price = {}
+            if item_prices.get(item_code):
+                item_price = (
+                    item_prices.get(item_code).get(item.stock_uom)
+                    or item_prices.get(item_code).get("None")
+                    or {}
                 )
-                batch_no_data = []
-                if search_batch_no:
-                    batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
-                    if batch_list:
-                        for batch in batch_list:
-                            if batch.qty > 0 and batch.batch_no:
-                                batch_doc = frappe.get_cached_doc(
-                                    "Batch", batch.batch_no
-                                )
-                                if (
-                                    str(batch_doc.expiry_date) > str(today)
-                                    or batch_doc.expiry_date in ["", None]
-                                ) and batch_doc.disabled == 0:
-                                    batch_no_data.append(
-                                        {
-                                            "batch_no": batch.batch_no,
-                                            "batch_qty": batch.qty,
-                                            "expiry_date": batch_doc.expiry_date,
-                                            "batch_price": batch_doc.posa_batch_price,
-                                            "manufacturing_date": batch_doc.manufacturing_date,
-                                        }
-                                    )
-                serial_no_data = []
-                if search_serial_no:
-                    serial_no_data = frappe.get_all(
-                        "Serial No",
-                        filters={
-                            "item_code": item_code,
-                            "status": "Active",
-                            "warehouse": warehouse,
-                        },
-                        fields=["name as serial_no"],
-                    )
-                item_stock_qty = 0
-                if pos_profile.get("posa_display_items_in_stock") or use_limit_search:
-                    item_stock_qty = get_stock_availability(
-                        item_code, pos_profile.get("warehouse")
-                    )
-                attributes = ""
-                if pos_profile.get("posa_show_template_items") and item.has_variants:
-                    attributes = get_item_attributes(item.item_code)
-                item_attributes = ""
-                if pos_profile.get("posa_show_template_items") and item.variant_of:
-                    item_attributes = frappe.get_all(
-                        "Item Variant Attribute",
-                        fields=["attribute", "attribute_value"],
-                        filters={"parent": item.item_code, "parentfield": "attributes"},
-                    )
-                if posa_display_items_in_stock and (
-                    not item_stock_qty or item_stock_qty < 0
-                ):
-                    pass
-                else:
-                    row = {}
-                    row.update(item)
-                    row.update(
-                        {
-                            "rate": item_price.get("price_list_rate") or 0,
-                            "currency": item_price.get("currency")
-                            or pos_profile.get("currency"),
-                            "item_barcode": item_barcode or [],
-                            "actual_qty": item_stock_qty or 0,
-                            "serial_no_data": serial_no_data or [],
-                            "batch_no_data": batch_no_data or [],
-                            "attributes": attributes or "",
-                            "item_attributes": item_attributes or "",
-                        }
-                    )
-                    result.append(row)
-        return result
+            item_barcode = frappe.get_all(
+                "Item Barcode",
+                filters={"parent": item_code},
+                fields=["barcode", "posa_uom"],
+            )
+            serial_no_data = []
+            if pos_profile.get("posa_search_serial_no"):
+                serial_no_data = frappe.get_all(
+                    "Serial No",
+                    filters={"item_code": item_code, "status": "Active"},
+                    fields=["name as serial_no"],
+                )
+            if pos_profile.get("posa_display_items_in_stock"):
+                item_stock_qty = get_stock_availability(
+                    item_code, pos_profile.get("warehouse")
+                )
+            attributes = ""
+            if pos_profile.get("posa_show_template_items") and item.has_variants:
+                attributes = get_item_attributes(item.item_code)
+            item_attributes = ""
+            if pos_profile.get("posa_show_template_items") and item.variant_of:
+                item_attributes = frappe.get_all(
+                    "Item Variant Attribute",
+                    fields=["attribute", "attribute_value"],
+                    filters={"parent": item.item_code, "parentfield": "attributes"},
+                )
+            if pos_profile.get("posa_display_items_in_stock") and (
+                not item_stock_qty or item_stock_qty < 0
+            ):
+                pass
+            else:
+                row = {}
+                row.update(item)
+                row.update(
+                    {
+                        "rate": item_price.get("price_list_rate") or 0,
+                        "currency": item_price.get("currency")
+                        or pos_profile.get("currency"),
+                        "item_barcode": item_barcode or [],
+                        "actual_qty": 0,
+                        "serial_no_data": serial_no_data or [],
+                        "attributes": attributes or "",
+                        "item_attributes": item_attributes or "",
+                    }
+                )
+                result.append(row)
 
-    if _pos_profile.get("posa_use_server_cache"):
-        return __get_items(pos_profile, price_list, item_group, search_value)
-    else:
-        return _get_items(pos_profile, price_list, item_group, search_value)
+    return result
 
 
 def get_item_group_condition(pos_profile):
-    cond = " and 1=1"
+    cond = "and 1=1"
     item_groups = get_item_groups(pos_profile)
     if item_groups:
-        cond = " and item_group in (%s)" % (", ".join(["%s"] * len(item_groups)))
+        cond = "and item_group in (%s)" % (", ".join(["%s"] * len(item_groups)))
 
     return cond % tuple(item_groups)
 
@@ -404,36 +311,21 @@ def get_customer_group_condition(pos_profile):
 
 @frappe.whitelist()
 def get_customer_names(pos_profile):
-    _pos_profile = json.loads(pos_profile)
-    ttl = _pos_profile.get("posa_server_cache_duration")
-    if ttl:
-        ttl = int(ttl) * 60
-
-    @redis_cache(ttl=ttl or 1800)
-    def __get_customer_names(pos_profile):
-        return _get_customer_names(pos_profile)
-
-    def _get_customer_names(pos_profile):
-        pos_profile = json.loads(pos_profile)
-        condition = ""
-        condition += get_customer_group_condition(pos_profile)
-        customers = frappe.db.sql(
-            """
-            SELECT name, mobile_no, email_id, tax_id, customer_name, primary_address
-            FROM `tabCustomer`
-            WHERE {0}
-            ORDER by name
-            """.format(
-                condition
-            ),
-            as_dict=1,
-        )
-        return customers
-
-    if _pos_profile.get("posa_use_server_cache"):
-        return __get_customer_names(pos_profile)
-    else:
-        return _get_customer_names(pos_profile)
+    pos_profile = json.loads(pos_profile)
+    condition = ""
+    condition += get_customer_group_condition(pos_profile)
+    customers = frappe.db.sql(
+        """
+        SELECT name, mobile_no, email_id, tax_id, customer_name, primary_address
+        FROM `tabCustomer`
+        WHERE {0}
+        ORDER by name
+        """.format(
+            condition
+        ),
+        as_dict=1,
+    )
+    return customers
 
 
 @frappe.whitelist()
@@ -448,38 +340,6 @@ def get_sales_person_names():
         as_dict=1,
     )
     return sales_persons
-
-
-def add_taxes_from_tax_template(item, parent_doc):
-    accounts_settings = frappe.get_cached_doc("Accounts Settings")
-    add_taxes_from_item_tax_template = (
-        accounts_settings.add_taxes_from_item_tax_template
-    )
-    if item.get("item_tax_template") and add_taxes_from_item_tax_template:
-        item_tax_template = item.get("item_tax_template")
-        taxes_template_details = frappe.get_all(
-            "Item Tax Template Detail",
-            filters={"parent": item_tax_template},
-            fields=["tax_type"],
-        )
-
-        for tax_detail in taxes_template_details:
-            tax_type = tax_detail.get("tax_type")
-
-            found = any(tax.account_head == tax_type for tax in parent_doc.taxes)
-            if not found:
-                tax_row = parent_doc.append("taxes", {})
-                tax_row.update(
-                    {
-                        "description": str(tax_type).split(" - ")[0],
-                        "charge_type": "On Net Total",
-                        "account_head": tax_type,
-                    }
-                )
-
-                if parent_doc.doctype == "Purchase Order":
-                    tax_row.update({"category": "Total", "add_deduct_tax": "Add"})
-                tax_row.db_insert()
 
 
 @frappe.whitelist()
@@ -501,9 +361,7 @@ def update_invoice(data):
             invoice_doc.update_stock = 0
         if len(invoice_doc.payments) == 0:
             invoice_doc.payments = ref_doc.payments
-        invoice_doc.paid_amount = (
-            invoice_doc.rounded_total or invoice_doc.grand_total or invoice_doc.total
-        )
+        invoice_doc.paid_amount = invoice_doc.rounded_total or invoice_doc.grand_total or invoice_doc.total
         for payment in invoice_doc.payments:
             if payment.default:
                 payment.amount = invoice_doc.paid_amount
@@ -600,8 +458,24 @@ def submit_invoice(invoice, data):
                 invoice_doc.is_pos = 0
                 is_payment_entry = 1
 
-    payments = invoice_doc.payments
+    payments = []
 
+    if data.get("is_cashback") and not is_payment_entry:
+        for payment in invoice.get("payments"):
+            for i in invoice_doc.payments:
+                if i.mode_of_payment == payment["mode_of_payment"]:
+                    i.amount = payment["amount"]
+                    i.base_amount = 0
+                    if i.amount:
+                        payments.append(i)
+                    break
+
+        if len(payments) == 0 and not invoice_doc.is_return and invoice_doc.is_pos:
+            payments = [invoice_doc.payments[0]]
+    else:
+        invoice_doc.is_pos = 0
+
+    invoice_doc.payments = payments
     if frappe.get_value("POS Profile", invoice_doc.pos_profile, "posa_auto_set_batch"):
         set_batch_nos(invoice_doc, "warehouse", throw=True)
     set_batch_nos_for_bundels(invoice_doc, "warehouse", throw=True)
@@ -636,13 +510,12 @@ def submit_invoice(invoice, data):
                     "is_payment_entry": is_payment_entry,
                     "total_cash": total_cash,
                     "cash_account": cash_account,
-                    "payments": payments,
                 },
             )
     else:
         invoice_doc.submit()
         redeeming_customer_credit(
-            invoice_doc, data, is_payment_entry, total_cash, cash_account, payments
+            invoice_doc, data, is_payment_entry, total_cash, cash_account
         )
 
     return {"name": invoice_doc.name, "status": invoice_doc.docstatus}
@@ -670,10 +543,9 @@ def set_batch_nos_for_bundels(doc, warehouse_field, throw=False):
 
 
 def redeeming_customer_credit(
-    invoice_doc, data, is_payment_entry, total_cash, cash_account, payments
+    invoice_doc, data, is_payment_entry, total_cash, cash_account
 ):
     # redeeming customer credit with journal voucher
-    today = nowdate()
     if data.get("redeemed_customer_credit"):
         cost_center = frappe.get_value(
             "POS Profile", invoice_doc.pos_profile, "cost_center"
@@ -698,7 +570,7 @@ def redeeming_customer_credit(
                     {
                         "doctype": "Journal Entry",
                         "voucher_type": "Journal Entry",
-                        "posting_date": today,
+                        "posting_date": nowdate(),
                         "company": invoice_doc.company,
                     }
                 )
@@ -733,39 +605,35 @@ def redeeming_customer_credit(
                 jv_doc.submit()
 
     if is_payment_entry and total_cash > 0:
-        for payment in payments:
-            if not payment.amount:
-                continue
-            payment_entry_doc = frappe.get_doc(
-                {
-                    "doctype": "Payment Entry",
-                    "posting_date": today,
-                    "payment_type": "Receive",
-                    "party_type": "Customer",
-                    "party": invoice_doc.customer,
-                    "paid_amount": payment.amount,
-                    "received_amount": payment.amount,
-                    "paid_from": invoice_doc.debit_to,
-                    "paid_to": payment.account,
-                    "company": invoice_doc.company,
-                    "mode_of_payment": payment.mode_of_payment,
-                    "reference_no": invoice_doc.posa_pos_opening_shift,
-                    "reference_date": today,
-                }
-            )
-
-            payment_reference = {
-                "allocated_amount": payment.amount,
-                "due_date": data.get("due_date"),
-                "reference_doctype": "Sales Invoice",
-                "reference_name": invoice_doc.name,
+        payment_entry_doc = frappe.get_doc(
+            {
+                "doctype": "Payment Entry",
+                "posting_date": nowdate(),
+                "payment_type": "Receive",
+                "party_type": "Customer",
+                "party": invoice_doc.customer,
+                "paid_amount": total_cash,
+                "received_amount": total_cash,
+                "paid_from": invoice_doc.debit_to,
+                "paid_to": cash_account["account"],
+                "company": invoice_doc.company,
             }
+        )
 
-            payment_entry_doc.append("references", payment_reference)
-            payment_entry_doc.flags.ignore_permissions = True
-            frappe.flags.ignore_account_permission = True
-            payment_entry_doc.save()
-            payment_entry_doc.submit()
+        payment_reference = {
+            "allocated_amount": total_cash,
+            "due_date": data.get("due_date"),
+            "outstanding_amount": total_cash,
+            "reference_doctype": "Sales Invoice",
+            "reference_name": invoice_doc.name,
+            "total_amount": total_cash,
+        }
+
+        payment_entry_doc.append("references", payment_reference)
+        payment_entry_doc.flags.ignore_permissions = True
+        frappe.flags.ignore_account_permission = True
+        payment_entry_doc.save()
+        payment_entry_doc.submit()
 
 
 def submit_in_background_job(kwargs):
@@ -775,12 +643,11 @@ def submit_in_background_job(kwargs):
     is_payment_entry = kwargs.get("is_payment_entry")
     total_cash = kwargs.get("total_cash")
     cash_account = kwargs.get("cash_account")
-    payments = kwargs.get("payments")
 
     invoice_doc = frappe.get_doc("Sales Invoice", invoice)
     invoice_doc.submit()
     redeeming_customer_credit(
-        invoice_doc, data, is_payment_entry, total_cash, cash_account, payments
+        invoice_doc, data, is_payment_entry, total_cash, cash_account
     )
 
 
@@ -851,7 +718,7 @@ def get_draft_invoices(pos_opening_shift):
     )
     data = []
     for invoice in invoices_list:
-        data.append(frappe.get_cached_doc("Sales Invoice", invoice["name"]))
+        data.append(frappe.get_doc("Sales Invoice", invoice["name"]))
     return data
 
 
@@ -865,119 +732,80 @@ def delete_invoice(invoice):
 
 @frappe.whitelist()
 def get_items_details(pos_profile, items_data):
-    _pos_profile = json.loads(pos_profile)
-    ttl = _pos_profile.get("posa_server_cache_duration")
-    if ttl:
-        ttl = int(ttl) * 60
+    pos_profile = json.loads(pos_profile)
+    items_data = json.loads(items_data)
+    warehouse = pos_profile.get("warehouse")
+    result = []
 
-    @redis_cache(ttl=ttl or 1800)
-    def __get_items_details(pos_profile, items_data):
-        return _get_items_details(pos_profile, items_data)
+    if len(items_data) > 0:
+        for item in items_data:
+            item_code = item.get("item_code")
+            item_stock_qty = get_stock_availability(item_code, warehouse)
+            has_batch_no, has_serial_no = frappe.get_value(
+                "Item", item_code, ["has_batch_no", "has_serial_no"]
+            )
 
-    def _get_items_details(pos_profile, items_data):
-        today = nowdate()
-        pos_profile = json.loads(pos_profile)
-        items_data = json.loads(items_data)
-        warehouse = pos_profile.get("warehouse")
-        result = []
+            uoms = frappe.get_all(
+                "UOM Conversion Detail",
+                filters={"parent": item_code},
+                fields=["uom", "conversion_factor"],
+            )
 
-        if len(items_data) > 0:
-            for item in items_data:
-                item_code = item.get("item_code")
-                item_stock_qty = get_stock_availability(item_code, warehouse)
-                has_batch_no, has_serial_no = frappe.get_value(
-                    "Item", item_code, ["has_batch_no", "has_serial_no"]
-                )
+            serial_no_data = frappe.get_all(
+                "Serial No",
+                filters={"item_code": item_code, "status": "Active"},
+                fields=["name as serial_no"],
+            )
 
-                uoms = frappe.get_all(
-                    "UOM Conversion Detail",
-                    filters={"parent": item_code},
-                    fields=["uom", "conversion_factor"],
-                )
+            batch_no_data = []
+            from erpnext.stock.doctype.batch.batch import get_batch_qty
 
-                serial_no_data = frappe.get_all(
-                    "Serial No",
-                    filters={
-                        "item_code": item_code,
-                        "status": "Active",
-                        "warehouse": warehouse,
-                    },
-                    fields=["name as serial_no"],
-                )
+            batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
 
-                batch_no_data = []
+            if batch_list:
+                for batch in batch_list:
+                    if batch.qty > 0 and batch.batch_no:
+                        batch_doc = frappe.get_doc("Batch", batch.batch_no)
+                        if (
+                            str(batch_doc.expiry_date) > str(nowdate())
+                            or batch_doc.expiry_date in ["", None]
+                        ) and batch_doc.disabled == 0:
+                            batch_no_data.append(
+                                {
+                                    "batch_no": batch.batch_no,
+                                    "batch_qty": batch.qty,
+                                    "expiry_date": batch_doc.expiry_date,
+                                    "btach_price": batch_doc.posa_btach_price,
+                                }
+                            )
 
-                batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
+            row = {}
+            row.update(item)
+            row.update(
+                {
+                    "item_uoms": uoms or [],
+                    "serial_no_data": serial_no_data or [],
+                    "batch_no_data": batch_no_data or [],
+                    "actual_qty": item_stock_qty or 0,
+                    "has_batch_no": has_batch_no,
+                    "has_serial_no": has_serial_no,
+                }
+            )
 
-                if batch_list:
-                    for batch in batch_list:
-                        if batch.qty > 0 and batch.batch_no:
-                            batch_doc = frappe.get_cached_doc("Batch", batch.batch_no)
-                            if (
-                                str(batch_doc.expiry_date) > str(today)
-                                or batch_doc.expiry_date in ["", None]
-                            ) and batch_doc.disabled == 0:
-                                batch_no_data.append(
-                                    {
-                                        "batch_no": batch.batch_no,
-                                        "batch_qty": batch.qty,
-                                        "expiry_date": batch_doc.expiry_date,
-                                        "batch_price": batch_doc.posa_batch_price,
-                                        "manufacturing_date": batch_doc.manufacturing_date,
-                                    }
-                                )
+            result.append(row)
 
-                row = {}
-                row.update(item)
-                row.update(
-                    {
-                        "item_uoms": uoms or [],
-                        "serial_no_data": serial_no_data or [],
-                        "batch_no_data": batch_no_data or [],
-                        "actual_qty": item_stock_qty or 0,
-                        "has_batch_no": has_batch_no,
-                        "has_serial_no": has_serial_no,
-                    }
-                )
-
-                result.append(row)
-
-        return result
-
-    if _pos_profile.get("posa_use_server_cache"):
-        return __get_items_details(pos_profile, items_data)
-    else:
-        return _get_items_details(pos_profile, items_data)
+    return result
 
 
 @frappe.whitelist()
 def get_item_detail(item, doc=None, warehouse=None, price_list=None):
     item = json.loads(item)
-    today = nowdate()
     item_code = item.get("item_code")
-    batch_no_data = []
-    if warehouse and item.get("has_batch_no"):
-        batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
-        if batch_list:
-            for batch in batch_list:
-                if batch.qty > 0 and batch.batch_no:
-                    batch_doc = frappe.get_cached_doc("Batch", batch.batch_no)
-                    if (
-                        str(batch_doc.expiry_date) > str(today)
-                        or batch_doc.expiry_date in ["", None]
-                    ) and batch_doc.disabled == 0:
-                        batch_no_data.append(
-                            {
-                                "batch_no": batch.batch_no,
-                                "batch_qty": batch.qty,
-                                "expiry_date": batch_doc.expiry_date,
-                                "batch_price": batch_doc.posa_batch_price,
-                                "manufacturing_date": batch_doc.manufacturing_date,
-                            }
-                        )
-
+    if warehouse and item.get("has_batch_no") and not item.get("batch_no"):
+        item["batch_no"] = get_batch_no(
+            item_code, warehouse, item.get("qty"), False, item.get("d")
+        )
     item["selling_price_list"] = price_list
-
     max_discount = frappe.get_value("Item", item_code, "max_discount")
     res = get_item_details(
         item,
@@ -987,7 +815,6 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None):
     if item.get("is_stock_item") and warehouse:
         res["actual_qty"] = get_stock_availability(item_code, warehouse)
     res["max_discount"] = max_discount
-    res["batch_no_data"] = batch_no_data
     return res
 
 
@@ -1010,69 +837,39 @@ def get_stock_availability(item_code, warehouse):
 
 @frappe.whitelist()
 def create_customer(
-    customer_id,
     customer_name,
     company,
-    pos_profile_doc,
-    tax_id=None,
-    mobile_no=None,
-    email_id=None,
+    tax_id,
+    mobile_no,
+    email_id,
     referral_code=None,
     birthday=None,
     customer_group=None,
     territory=None,
-    customer_type=None,
-    gender=None,
-    method="create",
 ):
-    pos_profile = json.loads(pos_profile_doc)
-    if method == "create":
-        is_exist = frappe.db.exists("Customer", {"customer_name": customer_name})
-        if pos_profile.get("posa_allow_duplicate_customer_names") or not is_exist:
-            customer = frappe.get_doc(
-                {
-                    "doctype": "Customer",
-                    "customer_name": customer_name,
-                    "posa_referral_company": company,
-                    "tax_id": tax_id,
-                    "mobile_no": mobile_no,
-                    "email_id": email_id,
-                    "posa_referral_code": referral_code,
-                    "posa_birthday": birthday,
-                    "customer_type": customer_type,
-                    "gender": gender,
-                }
-            )
-            if customer_group:
-                customer.customer_group = customer_group
-            else:
-                customer.customer_group = "All Customer Groups"
-            if territory:
-                customer.territory = territory
-            else:
-                customer.territory = "All Territories"
-            customer.save()
-            return customer
+    if not frappe.db.exists("Customer", {"customer_name": customer_name}):
+        customer = frappe.get_doc(
+            {
+                "doctype": "Customer",
+                "customer_name": customer_name,
+                "posa_referral_company": company,
+                "tax_id": tax_id,
+                "mobile_no": mobile_no,
+                "email_id": email_id,
+                "posa_referral_code": referral_code,
+                "posa_birthday": birthday,
+            }
+        )
+        if customer_group:
+            customer.customer_group = customer_group
         else:
-            frappe.throw(_("Customer already exists"))
-
-    elif method == "update":
-        customer_doc = frappe.get_doc("Customer", customer_id)
-        customer_doc.customer_name = customer_name
-        customer_doc.posa_referral_company = company
-        customer_doc.tax_id = tax_id
-        customer_doc.posa_referral_code = referral_code
-        customer_doc.posa_birthday = birthday
-        customer_doc.customer_type = customer_type
-        customer_doc.territory = territory
-        customer_doc.customer_group = customer_group
-        customer_doc.gender = gender
-        customer_doc.save()
-        if mobile_no != customer_doc.mobile_no:
-            set_customer_info(customer_doc.name, "mobile_no", mobile_no)
-        if email_id != customer_doc.email_id:
-            set_customer_info(customer_doc.name, "email_id", email_id)
-        return customer_doc
+            customer.customer_group = "All Customer Groups"
+        if territory:
+            customer.territory = territory
+        else:
+            customer.territory = "All Territories"
+        customer.save()
+        return customer
 
 
 @frappe.whitelist()
@@ -1145,7 +942,7 @@ def get_items_from_barcode(selling_price_list, currency, barcode):
 
 
 @frappe.whitelist()
-def set_customer_info(customer, fieldname, value=""):
+def set_customer_info(fieldname, customer, value=""):
     if fieldname == "loyalty_program":
         frappe.db.set_value("Customer", customer, "loyalty_program", value)
 
@@ -1448,15 +1245,6 @@ def get_new_payment_request(doc, mop):
     return make_payment_request(**args)
 
 
-def get_payment_gateway_account(args):
-    return frappe.db.get_value(
-        "Payment Gateway Account",
-        args,
-        ["name", "payment_gateway", "payment_account", "message"],
-        as_dict=1,
-    )
-
-
 def get_existing_payment_request(doc, pay):
     payment_gateway_account = frappe.db.get_value(
         "Payment Gateway Account",
@@ -1475,7 +1263,7 @@ def get_existing_payment_request(doc, pay):
     }
     pr = frappe.db.exists(args)
     if pr:
-        return frappe.get_doc("Payment Request", pr)
+        return frappe.get_doc("Payment Request", pr[0][0])
 
 
 def make_payment_request(**args):
@@ -1484,9 +1272,7 @@ def make_payment_request(**args):
     args = frappe._dict(args)
 
     ref_doc = frappe.get_doc(args.dt, args.dn)
-    gateway_account = get_payment_gateway_account(args.get("payment_gateway_account"))
-    if not gateway_account:
-        frappe.throw(_("Payment Gateway Account not found"))
+    gateway_account = get_gateway_details(args) or frappe._dict()
 
     grand_total = get_amount(ref_doc, gateway_account.get("payment_account"))
     if args.loyalty_points and args.dt == "Sales Order":
@@ -1639,11 +1425,6 @@ def get_customer_info(customer):
     res["loyalty_program"] = customer.loyalty_program
     res["customer_price_list"] = customer.default_price_list
     res["customer_group"] = customer.customer_group
-    res["customer_type"] = customer.customer_type
-    res["territory"] = customer.territory
-    res["birthday"] = customer.posa_birthday
-    res["gender"] = customer.gender
-    res["tax_id"] = customer.tax_id
     res["posa_discount"] = customer.posa_discount
     res["name"] = customer.name
     res["customer_name"] = customer.customer_name
@@ -1674,74 +1455,4 @@ def get_applicable_delivery_charges(
 ):
     return _get_applicable_delivery_charges(
         company, pos_profile, customer, shipping_address_name
-    )
-
-
-def auto_create_items():
-    # create 20000 items
-    for i in range(20000):
-        item_code = "AUTO-ITEM-{}".format(i)
-        item = frappe.get_doc(
-            {
-                "doctype": "Item",
-                "item_code": item_code,
-                "item_name": item_code,
-                "description": item_code,
-                "item_group": "Auto Items",
-                "is_stock_item": 0,
-                "stock_uom": "Nos",
-                "is_sales_item": 1,
-                "is_purchase_item": 0,
-                "is_fixed_asset": 0,
-                "is_sub_contracted_item": 0,
-                "is_pro_applicable": 0,
-                "is_manufactured_item": 0,
-                "is_service_item": 0,
-                "is_non_stock_item": 0,
-                "is_batch_item": 0,
-                "is_table_item": 0,
-                "is_variant_item": 0,
-                "is_stock_item": 1,
-                "opening_stock": 1000,
-                "valuation_rate": 50 + i,
-                "standard_rate": 100 + i,
-            }
-        )
-        print("Creating Item: {}".format(item_code))
-        item.insert(ignore_permissions=True)
-        frappe.db.commit()
-
-
-@frappe.whitelist()
-def search_serial_or_batch_or_barcode_number(search_value, search_serial_no):
-    # search barcode no
-    barcode_data = frappe.db.get_value(
-        "Item Barcode",
-        {"barcode": search_value},
-        ["barcode", "parent as item_code"],
-        as_dict=True,
-    )
-    if barcode_data:
-        return barcode_data
-    # search serial no
-    if search_serial_no:
-        serial_no_data = frappe.db.get_value(
-            "Serial No", search_value, ["name as serial_no", "item_code"], as_dict=True
-        )
-        if serial_no_data:
-            return serial_no_data
-    # search batch no
-    batch_no_data = frappe.db.get_value(
-        "Batch", search_value, ["name as batch_no", "item as item_code"], as_dict=True
-    )
-    if batch_no_data:
-        return batch_no_data
-    return {}
-
-
-def get_seearch_items_conditions(item_code, serial_no, batch_no, barcode):
-    if serial_no or batch_no or barcode:
-        return " and name = {0}".format(frappe.db.escape(item_code))
-    return """ and (name like {item_code} or item_name like {item_code})""".format(
-        item_code=frappe.db.escape("%" + item_code + "%")
     )

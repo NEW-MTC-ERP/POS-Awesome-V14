@@ -40,10 +40,9 @@
                   show-select
                   v-model="selected"
                 >
-                  <template v-slot:item.grand_total="{ item }">
-                    {{ currencySymbol(item.currency) }}
-                    {{ formtCurrency(item.grand_total) }}</template
-                  >
+                  <template v-slot:item.grand_total="{ item }">{{
+                    formtCurrency(item.grand_total)
+                  }}</template>
                 </v-data-table>
               </template>
             </v-col>
@@ -67,9 +66,7 @@
 
 <script>
 import { evntBus } from '../../bus';
-import format from '../../format';
 export default {
-  mixins: [format],
   data: () => ({
     invoicesDialog: false,
     singleSelect: true,
@@ -99,7 +96,7 @@ export default {
       {
         text: __('Amount'),
         value: 'grand_total',
-        align: 'end',
+        align: 'start',
         sortable: false,
       },
     ],
@@ -150,6 +147,10 @@ export default {
         evntBus.$emit('load_return_invoice', data);
         this.invoicesDialog = false;
       }
+    },
+    formtCurrency(value) {
+      value = parseFloat(value);
+      return value.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,');
     },
   },
   created: function () {

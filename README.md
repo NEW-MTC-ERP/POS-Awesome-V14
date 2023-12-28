@@ -37,9 +37,6 @@
 26. Supports Customer and Customer Group price list
 27. Supports Sales Person
 28. Supports Delivery Charges
-29. Search and add items by Batch Number
-30. Accept new payments from customers against existing invoices
-31. Payments Reconciliation
 
 ---
 
@@ -51,7 +48,7 @@ One-click installing available if you are hosting on FC from [here](https://frap
 
 #### Self Hosting:
 
-1. `bench get-app branch version-14 https://github.com/yrestom/POS-Awesome.git`
+1. `bench get-app https://github.com/yrestom/POS-Awesome.git`
 2. `bench setup requirements`
 3. `bench build --app posawesome`
 4. `bench restart`
@@ -68,7 +65,7 @@ If you are hosting on FC premium support is available [here](https://frappecloud
 
 #### Self Hosting:
 
-If you need premium support please email me [here](mailto:info@totrox.com)
+If you need premium support it is available [here](https://forms.clickup.com/2191574/f/22w6p-14180/8J92BNHRMKG5ZW2EPF)
 
 #### Community Support:
 
@@ -78,8 +75,7 @@ Available in GitHub [discussions](https://github.com/yrestom/POS-Awesome/discuss
 
 ### New Features and Bug report:
 
-- Please Create Github Issue from [here](https://github.com/yrestom/POS-Awesome/issues/new/choose) after checking the existing issues
-- For paid features, you can email me [here](mailto:info@totrox.com)
+Please Create Github Issue from [here](https://github.com/yrestom/POS-Awesome/issues/new/choose) after checking the existing issues, and for paid features you can submit this [form](https://forms.clickup.com/2191574/f/22w6p-14740/NK7DUHU0CPM3HVXVDC)
 
 ---
 

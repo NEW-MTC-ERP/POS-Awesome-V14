@@ -1,8 +1,10 @@
 <template>
-  <div fluid class="mt-2">
+  <div fluid>
     <ClosingDialog></ClosingDialog>
     <Drafts></Drafts>
     <Returns></Returns>
+    <NewCustomer></NewCustomer>
+    <EditCustomer></EditCustomer>
     <NewAddress></NewAddress>
     <MpesaPayments></MpesaPayments>
     <Variants></Variants>
@@ -60,6 +62,7 @@
   </div>
 </template>
 
+
 <script>
 import { evntBus } from '../../bus';
 import ItemsSelector from './ItemsSelector.vue';
@@ -70,6 +73,8 @@ import PosOffers from './PosOffers.vue';
 import PosCoupons from './PosCoupons.vue';
 import Drafts from './Drafts.vue';
 import ClosingDialog from './ClosingDialog.vue';
+import NewCustomer from './NewCustomer.vue';
+import EditCustomer from './EditCustomer.vue';
 import NewAddress from './NewAddress.vue';
 import Variants from './Variants.vue';
 import Returns from './Returns.vue';
@@ -94,10 +99,11 @@ export default {
     Payments,
     Drafts,
     ClosingDialog,
-
+    NewCustomer,
     Returns,
     PosOffers,
     PosCoupons,
+    EditCustomer,
     NewAddress,
     Variants,
     MpesaPayments,
@@ -137,7 +143,7 @@ export default {
           if (r.message) {
             evntBus.$emit('open_ClosingDialog', r.message);
           } else {
-            // console.log(r);
+            console.log(r);
           }
         });
     },
@@ -180,7 +186,7 @@ export default {
     },
   },
 
-  mounted: function () {
+  created: function () {
     this.$nextTick(function () {
       this.check_opening_entry();
       this.get_pos_setting();
@@ -217,16 +223,8 @@ export default {
       });
     });
   },
-  beforeDestroy() {
-    evntBus.$off('close_opening_dialog');
-    evntBus.$off('register_pos_data');
-    evntBus.$off('LoadPosProfile');
-    evntBus.$off('show_offers');
-    evntBus.$off('show_coupons');
-    evntBus.$off('open_closing_dialog');
-    evntBus.$off('submit_closing_pos');
-  },
 };
-</script>
+</script> 
 
-<style scoped></style>
+<style scoped>
+</style>

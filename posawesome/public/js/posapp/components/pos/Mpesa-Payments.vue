@@ -62,7 +62,7 @@
             color="success"
             dark
             @click="submit_dialog"
-            >{{ __('Submit') }}</v-btn
+            >{{ __('Select') }}</v-btn
           >
         </v-card-actions>
       </v-card>
@@ -174,9 +174,6 @@ export default {
       this.dialog_data = '';
       this.selected = [];
     });
-  },
-  beforeDestroy() {
-    evntBus.$off('open_mpesa_payments');
   },
 };
 </script>

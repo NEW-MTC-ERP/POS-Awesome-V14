@@ -143,10 +143,6 @@ doc_events = {
 # 	"Task": "posawesome.task.get_dashboard_data"
 # }
 
-# override_doctype_class = {
-# "doctype": "method",
-# }
-
 # exempt linked doctypes from being automatically cancelled
 #
 # auto_cancel_exempted_doctypes = ["Auto Repeat"]
@@ -171,7 +167,7 @@ fixtures = [
                     "POS Profile-posa_allow_partial_payment",
                     "POS Profile-posa_allow_credit_sale",
                     "POS Profile-posa_pos_awesome_advance_settings",
-                    "Batch-posa_batch_price",
+                    "Batch-posa_btach_price",
                     "POS Profile-posa_max_discount_allowed",
                     "POS Profile-posa_allow_return",
                     "POS Profile-posa_col_1",
@@ -238,22 +234,6 @@ fixtures = [
                     "POS Profile-posa_use_delivery_charges",
                     "POS Profile-hide_expected_amount",
                     "POS Profile-posa_allow_change_posting_date",
-                    "POS Profile-posa_default_card_view",
-                    "POS Profile-posa_default_sales_order",
-                    "POS Profile-column_break_dqsba",
-                    "POS Profile-posa_use_server_cache",
-                    "POS Profile-posa_server_cache_duration",
-                    "POS Profile-posa_allow_duplicate_customer_names",
-                    "POS Profile-column_break_anyol",
-                    "POS Profile-pose_use_limit_search",
-                    "POS Profile-posa_search_limit",
-                    "POS Profile-posa_search_batch_no",
-                    "POS Profile-pos_awesome_payments",
-                    "POS Profile-posa_use_pos_awesome_payments",
-                    "POS Profile-posa_allow_make_new_payments",
-                    "POS Profile-posa_allow_reconcile_payments",
-                    "POS Profile-column_break_uolvm",
-                    "POS Profile-posa_allow_mpesa_reconcile_payments",
                 ),
             ]
         ],

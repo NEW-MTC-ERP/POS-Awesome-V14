@@ -52,34 +52,22 @@
         </template>
       </template>
     </v-autocomplete>
-    <div class="mb-8">
-      <UpdateCustomer></UpdateCustomer>
-    </div>
   </div>
 </template>
 
 <script>
 import { evntBus } from '../../bus';
-import UpdateCustomer from './UpdateCustomer.vue';
 export default {
   data: () => ({
     pos_profile: '',
     customers: [],
     customer: '',
     readonly: false,
-    customer_info: {},
   }),
-
-  components: {
-    UpdateCustomer,
-  },
 
   methods: {
     get_customer_names() {
       const vm = this;
-      if (this.customers.length > 0) {
-        return;
-      }
       if (vm.pos_profile.posa_local_storage && localStorage.customer_storage) {
         vm.customers = JSON.parse(localStorage.getItem('customer_storage'));
       }
@@ -104,10 +92,10 @@ export default {
       });
     },
     new_customer() {
-      evntBus.$emit('open_update_customer', null);
+      evntBus.$emit('open_new_customer');
     },
     edit_customer() {
-      evntBus.$emit('open_update_customer', this.customer_info);
+      evntBus.$emit('open_edit_customer');
     },
     customFilter(item, queryText, itemText) {
       const textOne = item.customer_name
@@ -137,10 +125,6 @@ export default {
         this.pos_profile = pos_profile;
         this.get_customer_names();
       });
-      evntBus.$on('payments_register_pos_profile', (pos_profile) => {
-        this.pos_profile = pos_profile;
-        this.get_customer_names();
-      });
       evntBus.$on('set_customer', (customer) => {
         this.customer = customer;
       });
@@ -149,12 +133,6 @@ export default {
       });
       evntBus.$on('set_customer_readonly', (value) => {
         this.readonly = value;
-      });
-      evntBus.$on('set_customer_info_to_edit', (data) => {
-        this.customer_info = data;
-      });
-      evntBus.$on('fetch_customer_details', () => {
-        this.get_customer_names();
       });
     });
   },

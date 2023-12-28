@@ -1,6 +1,6 @@
 <template>
   <v-row justify="center">
-    <v-dialog v-model="draftsDialog" max-width="900px">
+    <v-dialog v-model="draftsDialog" max-width="800px">
       <!-- <template v-slot:activator="{ on, attrs }">
         <v-btn color="primary" dark v-bind="attrs" v-on="on">Open Dialog</v-btn>
       </template>-->
@@ -12,7 +12,7 @@
         </v-card-title>
         <v-card-text class="pa-0">
           <v-container>
-            <v-row no-gutters>
+            <v-row>
               <v-col cols="12" class="pa-1">
                 <template>
                   <v-data-table
@@ -24,13 +24,6 @@
                     show-select
                     v-model="selected"
                   >
-                    <template v-slot:item.posting_time="{ item }">
-                      {{ item.posting_time.split('.')[0] }}
-                    </template>
-                    <template v-slot:item.grand_total="{ item }">
-                      {{ currencySymbol(item.currency) }}
-                      {{ formtCurrency(item.grand_total) }}
-                    </template>
                   </v-data-table>
                 </template>
               </v-col>
@@ -49,10 +42,8 @@
 
 <script>
 import { evntBus } from '../../bus';
-import format from '../../format';
 export default {
   // props: ["draftsDialog"],
-  mixins: [format],
   data: () => ({
     draftsDialog: false,
     singleSelect: true,
@@ -61,7 +52,7 @@ export default {
     headers: [
       {
         text: __('Customer'),
-        value: 'customer_name',
+        value: 'customer',
         align: 'start',
         sortable: true,
       },
@@ -72,12 +63,6 @@ export default {
         value: 'posting_date',
       },
       {
-        text: __('Time'),
-        align: 'start',
-        sortable: true,
-        value: 'posting_time',
-      },
-      {
         text: __('Invoice'),
         value: 'name',
         align: 'start',
@@ -86,7 +71,7 @@ export default {
       {
         text: __('Amount'),
         value: 'grand_total',
-        align: 'end',
+        align: 'start',
         sortable: false,
       },
     ],

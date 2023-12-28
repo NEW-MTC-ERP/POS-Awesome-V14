@@ -91,9 +91,7 @@
 
 <script>
 import { evntBus } from '../../bus';
-import format from '../../format';
 export default {
-  mixins: [format],
   data: () => ({
     loading: false,
     pos_profile: '',
@@ -139,6 +137,10 @@ export default {
         );
       }
       return result;
+    },
+    formtCurrency(value) {
+      value = parseFloat(value);
+      return value.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,');
     },
     updatePosOffers(offers) {
       const toRemove = [];

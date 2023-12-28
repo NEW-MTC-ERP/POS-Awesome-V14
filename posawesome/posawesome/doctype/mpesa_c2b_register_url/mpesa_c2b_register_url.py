@@ -34,13 +34,13 @@ class MpesaC2BRegisterURL(Document):
         confirmation_url = (
             site_url + "/api/method/posawesome.posawesome.api.m_pesa.confirmation"
         )
-        register_url = base_url + "/mpesa/c2b/v2/registerurl"
+        register_url = base_url + "/mpesa/c2b/v1/registerurl"
 
         payload = {
             "ShortCode": business_shortcode,
             "ResponseType": "Completed",
-            "ConfirmationURL": confirmation_url,
-            "ValidationURL": validation_url,
+            "ConfirmationURL": validation_url,
+            "ValidationURL": confirmation_url,
         }
         headers = {
             "Authorization": "Bearer {0}".format(token),
